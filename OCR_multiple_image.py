@@ -11,6 +11,67 @@ from transformers import AutoProcessor, HunYuanVLForConditionalGeneration
 
 MODEL_ID = "tencent/HunyuanOCR"
 
+import re
+
+KANA_RE = re.compile(r"[\u3040-\u30FF]")  # ひらがな・カタカナ
+
+def _looks_like_cn_boilerplate(line: str) -> bool:
+    if not line:
+        return True
+    s = line.strip()
+
+    # 典型の前置き（簡体/繁体混在も吸う）
+    fixed = [
+        r"^以下是图片中的文字内容[。．\.]*$",
+        r"^以下为图片中的文字内容[。．\.]*$",
+        r"^以下是圖片中的文字內容[。．\.]*$",
+        r"^以下為圖片中的文字內容[。．\.]*$",
+        r"^图片中的文字如下[:：]?$",
+        r"^图片中的文字为[:：]?$",
+        r"^圖片中的文字如下[:：]?$",
+        r"^圖片中的文字為[:：]?$",
+        r"^图片中的文字内容[:：]?$",
+        r"^圖片中的文字內容[:：]?$",
+        r"^识别结果[:：]?$",
+        r"^识别结果如下[:：]?$",
+        r"^辨識結果[:：]?$",
+        r"^辨識結果如下[:：]?$",
+        r"^OCR\s*Result[:：]?$",
+        r"^The text in the image.*$",
+    ]
+    for p in fixed:
+        if re.match(p, s):
+            return True
+
+    # “前置きっぽいキーワード”を含むのに、かなが一切ない短文は前置き扱いで落とす
+    # ※日本語本文にはかなが混ざることが多いので誤爆が少ない
+    if (not KANA_RE.search(s)) and len(s) <= 40:
+        if re.search(r"(图片|圖片|文字|内容|內容|如下|识别|辨識|结果|結果|OCR)", s):
+            return True
+
+    return False
+
+
+def clean_ocr_text(text: str) -> str:
+    if not text:
+        return ""
+    lines = [ln.strip() for ln in text.splitlines()]
+
+    # 先頭の前置き行を「連続で」削る（最大5行まで）
+    removed = 0
+    while lines and removed < 5 and _looks_like_cn_boilerplate(lines[0]):
+        lines.pop(0)
+        removed += 1
+
+    # 先頭空行も削除
+    while lines and lines[0] == "":
+        lines.pop(0)
+
+    # 末尾空行も削除
+    while lines and lines[-1] == "":
+        lines.pop()
+
+    return "\n".join(lines).strip()
 
 def pick_dtype():
     if not torch.cuda.is_available():
@@ -75,7 +136,8 @@ def ocr_one(
         )
 
     gen = out[0][inputs["input_ids"].shape[1]:]
-    text = processor.decode(gen, skip_special_tokens=True).strip()
+    text = processor.decode(gen, skip_special_tokens=True)
+    text = clean_ocr_text(text)
     return text
 
 
@@ -83,7 +145,11 @@ def main():
     ap = argparse.ArgumentParser(description="Batch OCR with HunyuanOCR (folder -> TXT/JSONL)")
     ap.add_argument("--input_dir", required=True, help="画像フォルダ")
     ap.add_argument("--glob", default="*.png", help="対象パターン (例: review_page_*.png, *.jpg, *.*)")
-    ap.add_argument("--prompt", default="识别图片中的文字", help="OCRプロンプト")
+    ap.add_argument(
+        "--prompt",
+        default="画像内の文字をそのまま書き起こしてください。説明文や前置き（例：『以下は～』）は出力せず、文字の本文だけを改行を保って出力してください。日本語は日本語のまま出力してください。",
+        help="OCRプロンプト"
+    )
     ap.add_argument("--output_txt", required=True, help="まとめTXT出力パス")
     ap.add_argument("--output_jsonl", default="", help="JSONL出力パス（任意）")
     ap.add_argument("--max_new_tokens", type=int, default=1024, help="10GBなら 512〜2048目安")
