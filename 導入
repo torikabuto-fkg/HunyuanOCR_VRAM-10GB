@@ -1,3 +1,30 @@
-＃インストール
+# Python 3.11 本体と venv 用パッケージをインストール
+sudo apt install -y python3.11 python3.11-venv python3.11-distutils
+
+# 新しい venv を作成・アクティベート
+# 作業ディレクトリに移動（例ではdesktopに .venv を作ります）
+cd /mnt/c/Users/desktop
+
+# 既存の .venv を削除しておく（必要なら）
+rm -rf .venv
+
+# Python 3.11 で venv を作成
+python3.11 -m venv .venv
+
+# 仮想環境を有効化
+cd /mnt/c/Users/torik/desktop
+source .venv/bin/activate
+
+# 1. 安定版PyTorch (v2.5.1 / CUDA 12.1) をインストール
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+# ※ CUDAのバージョン(cu118やcu121)はご自身の環境に合わせてください
+
+# 2. Hunyuan対応のTransformers 
 pip install git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4
-pip install torch pillow accelerate
+
+# 3. 必須ライブラリ + 量子化用ライブラリ (bitsandbytes)
+pip install pillow accelerate bitsandbytes
+
+# 4. (推奨) 高速化ライブラリ Flash Attention 2
+# インストールに時間がかかる場合があります。エラーが出る場合はスキップしても動きます。
+pip install flash-attn --no-build-isolation
