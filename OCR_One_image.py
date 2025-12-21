@@ -88,5 +88,5 @@ def main(image_path: str):
     print("-" * 30)
 
 if __name__ == "__main__":
-    TARGET_IMAGE = r"/mnt/c/Users/市川　裕大/Desktop/済生会川口/review_page_001.png"
+    TARGET_IMAGE = r"$PATH$"
     main(TARGET_IMAGE)
