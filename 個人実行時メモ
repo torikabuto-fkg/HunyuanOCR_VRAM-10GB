@@ -1,0 +1,4 @@
+.\surya-env\Scripts\Activate.ps1
+でsurya-envを有効化。
+その後
+ python hunyuan_batch_ocr.py --input_dir "./大久保病院" --glob "review_page_*.png" --output_txt "大久保病院/output.txt" --output_jsonl "大久保病院/output.jsonl"
