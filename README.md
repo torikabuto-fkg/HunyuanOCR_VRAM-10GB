@@ -1,55 +1,25 @@
-# HunyuanOCR_VRAM-10GB
+# HunyuanOCR & Qwen2.5-VL-7B-Instruct-AWQ Batch OCR Toolkit (for VRAM 10GB)
 
-![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python&logoColor=white)
-![GPU](https://img.shields.io/badge/GPU-RTX%203080%2010GB-green?logo=nvidia)
-![Model](https://img.shields.io/badge/Model-HunyuanOCR-orange)
+このリポジトリは、VRAMが10GB前後のGPU（NVIDIA RTX 3080、RTX A4000など）環境に最適化された、高精度マルチモーダルVLMによるバッチ（一括）OCR処理用ツールキットです。
 
-**RTX 3080 (VRAM 10GB) 環境で [HunyuanOCR](https://huggingface.co/tencent/HunyuanOCR) を動作させるための軽量化・最適化リポジトリ。**
-
-Tencent の HunyuanOCR は高精度な VLM ベースの OCR モデルですが、公式のままでは VRAM 10GB では OOM になります。  
-本リポジトリでは **画像縮小・dtype 自動選択・OOM 自動リカバリ** などの最適化により、RTX 3080 でも安定動作を実現しています。
-
----
-
-## ✨ 特徴
-
-| 機能 | 説明 |
-|------|------|
-| **VRAM 10GB 対応** | 画像長辺の自動縮小 + bf16/fp16 自動選択で 10GB GPU に収まるよう最適化 |
-| **OOM 自動リカバリ** | CUDA OOM 発生時に画像サイズ・トークン数を自動縮小して 1 回リトライ |
-| **中国語前置き除去** | HunyuanOCR が出力しがちな中国語の前置き文（「以下是图片中的文字内容」等）を自動フィルタ |
-| **日本語最適化プロンプト** | 日本語テキストをそのまま書き起こすカスタムプロンプトを使用 |
-| **自然順ソート** | `review_page_1.png` → `review_page_2.png` → ... → `review_page_10.png` の正しい順序で処理 |
-| **複数出力形式** | TXT（ページ区切り付き）+ JSONL（プログラム連携用） |
-
----
-
-## 📁 ファイル構成
-
-```
-HunyuanOCR_VRAM-10GB/
-├── OCR_One_image.py        # 1 枚の画像を OCR（結果はターミナルに表示）
-├── OCR_multiple_image.py   # フォルダ内の全画像を一括 OCR（TXT/JSONL 出力）
-├── requirements.txt
-└── README.md
-```
+高性能な **Tencent HunyuanOCR** と **Qwen2.5-VL-7B-Instruct-AWQ** (4bit量子化版) の双方に対応し、OOM自動リカバリや余分な中国語の前置き文の自動クレンジング機能などを備えています。
 
 ---
 
 ## 📋 必要要件
 
-- **Python 3.8+**
-- **NVIDIA GPU**（VRAM 10GB 以上）— RTX 3080 で動作確認済み
+- **Python 3.8+ (3.10推奨)**
+- **NVIDIA GPU**（VRAM 10GB 以上）— RTX 3080、RTX A4000 で動作確認済み
 - **CUDA Toolkit** & **cuDNN**
 
 ### 動作確認環境
 
 | 項目 | 値 |
 |------|-----|
-| GPU | NVIDIA RTX 3080 (10GB VRAM) |
-| Python | 3.10.11 |
-| PyTorch | 2.x + CUDA |
-| Model | `tencent/HunyuanOCR`（HuggingFace） |
+| GPU | NVIDIA RTX 3080 (10GB VRAM) / RTX A4000 (16GB VRAM) |
+| Python | 3.10.x |
+| PyTorch | 2.6.0 + CUDA 12.4 |
+| Models | `tencent/HunyuanOCR` / `Qwen/Qwen2.5-VL-7B-Instruct-AWQ` |
 
 ---
 
@@ -62,14 +32,70 @@ git clone https://github.com/<your-username>/HunyuanOCR_VRAM-10GB.git
 cd HunyuanOCR_VRAM-10GB
 ```
 
-### 2. 依存パッケージをインストール
+### 2. 仮想環境の構築と依存パッケージのインストール
+
+HunyuanOCR は比較的新しいモデルであり、公式の推奨ブランチから `transformers` をインストールする必要があります。
 
 ```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-pip install transformers accelerate pillow requests
+# 仮想環境作成 (推奨)
+conda create -n hunyuan-env python=3.10 -y
+conda activate hunyuan-env
+
+# PyTorch インストール
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# HunyuanOCR対応の特定 transformers コミットをインストール
+pip install git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4
+
+# その他の依存パッケージをインストール
+pip install pillow requests accelerate autoawq qwen-vl-utils huggingface-hub
 ```
 
-> **注意**: 初回実行時に HunyuanOCR モデル（約 5GB）が HuggingFace から自動ダウンロードされます。
+> **注意**: 初回実行時に、指定したモデルのチェックポイント（HunyuanOCR: 約5GB / Qwen2.5-VL-AWQ: 約5GB）が HuggingFace Hub から自動的にダウンロードされます。
+
+---
+
+## 🛠️ トラブルシューティング（非常に重要）
+
+環境構築時、およびスクリプトの実行時には以下の2つのエラーが発生することがあります。本ツールでは、それらに対して既に対策コードを組み込み、対処方法を整理しています。
+
+### ① OSError: tencent/HunyuanOCR does not appear to have a file named modeling_hunyuan_ocr.py
+- **原因**: ネット上の古い記事にある `get_class_from_dynamic_module` を使ったハックコードは、Hugging Face 上の `tencent/HunyuanOCR` にモデル定義の `.py` ファイルが含まれていないため動作しません。
+- **対策**: `transformers` の最新対応版に内蔵されている正規のクラス `HunYuanVLForConditionalGeneration` をインポートしてロードすることで、ハックを排して完全に解決しています。
+
+### ② ImportError: cannot import name 'PytorchGELUTanh' from 'transformers.activations'
+- **原因**: 特定コミット版の `transformers` では `PytorchGELUTanh` が `GELUTanh` にリネーム（あるいは削除）されており、`autoawq` のインポート時にエラーが発生して Qwen の AWQ モデルが読み込めなくなります。
+- **対策**: 環境内の `autoawq` ライブラリのファイルを以下のように修正します。
+
+**修正対象ファイル**:
+`~/miniconda3/envs/hunyuan-env/lib/python3.10/site-packages/awq/quantize/scale.py`
+
+**修正内容 (12行目付近のインポート処理を try-except でラップ)**:
+```python
+# 修正前：
+# from transformers.activations import NewGELUActivation, PytorchGELUTanh, GELUActivation
+
+# 修正後：
+try:
+    from transformers.activations import NewGELUActivation, GELUActivation, PytorchGELUTanh
+except ImportError:
+    from transformers.activations import NewGELUActivation, GELUActivation
+    try:
+        from transformers.activations import GELUTanh as PytorchGELUTanh
+    except ImportError:
+        PytorchGELUTanh = None
+```
+および、その直後の `allowed_act_fns`（16行目付近）のリストから `PytorchGELUTanh` を除外し、最後に条件付きで追加します：
+```python
+allowed_act_fns = [
+    nn.GELU,
+    BloomGelu,
+    NewGELUActivation,
+    GELUActivation,
+]
+if PytorchGELUTanh is not None:
+    allowed_act_fns.append(PytorchGELUTanh)
+```
 
 ---
 
@@ -88,30 +114,33 @@ TARGET_IMAGE = r"C:\Users\user\Desktop\sample.png"
 python OCR_One_image.py
 ```
 
-結果はターミナルに表示されます:
-
-```
-Loading tencent/HunyuanOCR (dtype=torch.bfloat16, eager attention)...
-Running OCR inference...
-------------------------------
-OCR Result:
-（認識されたテキストがここに表示）
-------------------------------
-```
+結果はターミナルに表示されます。
 
 ---
 
-### フォルダ内の全画像を一括 OCR — `OCR_multiple_image.py`
+### フォルダ内の全画像を一括 OCR (バッチモード)
 
+本リポジトリのメインスクリプトは、コマンドライン引数（`argparse`）に完全対応し、引数を変えるだけで多様な設定で一括処理可能です。自然順ソート（001 -> 002 -> 010...）されて順次処理されます。
+
+#### Tencent HunyuanOCR を使う場合: `OCR_multiple_image.py`
 ```bash
 python OCR_multiple_image.py \
-    --input_dir "画像フォルダのパス" \
+    --input_dir "./画像" \
     --glob "review_page_*.png" \
-    --output_txt "出力先/output.txt" \
-    --output_jsonl "出力先/output.jsonl"
+    --output_txt "./output_hunyuan.txt" \
+    --output_jsonl "./output_hunyuan.jsonl"
 ```
 
-#### 引数一覧
+#### Qwen2.5-VL-7B-Instruct-AWQ を使う場合: `run_qwen.py`
+```bash
+python run_qwen.py \
+    --input_dir "./画像" \
+    --glob "review_page_*.png" \
+    --output_txt "./output_qwen.txt" \
+    --output_jsonl "./output_qwen.jsonl"
+```
+
+#### 引数一覧 (両スクリプト共通)
 
 | 引数 | デフォルト | 説明 |
 |------|-----------|------|
@@ -121,30 +150,7 @@ python OCR_multiple_image.py \
 | `--output_jsonl` | （任意） | JSONL の出力パス |
 | `--prompt` | 日本語書き起こし用 | OCR に渡すプロンプト |
 | `--max_new_tokens` | `1024` | 生成トークン数の上限（10GB なら 512〜2048 目安） |
-| `--long_side` | `1280` | 画像長辺の縮小サイズ（10GB なら 1024〜1600 目安） |
-
-#### 実行例
-
-```bash
-# Hokuto の口コミ画像を一括 OCR
-python OCR_multiple_image.py \
-    --input_dir "./hokuto_reviews" \
-    --glob "review_page_*.png" \
-    --output_txt "./hokuto_reviews/all_reviews.txt" \
-    --output_jsonl "./hokuto_reviews/all_reviews.jsonl"
-```
-
-#### 実行ログ
-
-```
-Loading tencent/HunyuanOCR (dtype=torch.bfloat16, eager attention)...
-[1/47] OCR: ./hokuto_reviews/review_page_001.png
-[2/47] OCR: ./hokuto_reviews/review_page_002.png
-...
-[47/47] OCR: ./hokuto_reviews/review_page_047.png
-Saved TXT : ./hokuto_reviews/all_reviews.txt
-Saved JSONL: ./hokuto_reviews/all_reviews.jsonl
-```
+| `--long_side` | `1280` | [HunyuanOCRのみ] 画像長辺の縮小サイズ（10GB なら 1024〜1280 推奨） |
 
 ---
 
@@ -158,8 +164,6 @@ Saved JSONL: ./hokuto_reviews/all_reviews.jsonl
 
 ===== ./hokuto_reviews/review_page_002.png =====
 （2ページ目の認識テキスト）
-
-...
 ```
 
 ### JSONL（1 行 = 1 画像）
@@ -171,42 +175,30 @@ Saved JSONL: ./hokuto_reviews/all_reviews.jsonl
 
 ---
 
-## ⚙️ VRAM 最適化のポイント
+## ⚙️ VRAM 最適化と OOM 自動リカバリ
 
-### 画像サイズ (`--long_side`)
+### 画像サイズとVRAM目安
 
-| VRAM | 推奨値 | 備考 |
-|------|--------|------|
-| 10GB | 1024〜1280 | RTX 3080 向け |
-| 16GB | 1280〜1600 | RTX 4080 等 |
-| 24GB | 1600〜2048 | RTX 3090/4090 |
+| VRAM | HunyuanOCR 推奨画像サイズ (`--long_side`) | Qwen2.5-VL 最大ピクセル設定 | 備考 |
+|------|-----------------------|-----------------------|------|
+| 10GB | 1024〜1280 | 768 * 768 制限 (内蔵済) | RTX 3080 / RTX 4070 向け |
+| 16GB | 1280〜1600 | 1024 * 1024 制限 | RTX 4080 / RTX A4000 等 |
+| 24GB | 1600〜2048 | 制限なし（自動） | RTX 3090 / RTX 4090 等 |
 
-### トークン数 (`--max_new_tokens`)
-
-| VRAM | 推奨値 | 備考 |
-|------|--------|------|
-| 10GB | 512〜1024 | 長文の場合は 1024 |
-| 16GB+ | 1024〜2048 | |
-
-### OOM 自動リカバリ
-
-CUDA OOM が発生した場合、自動的に以下の設定で 1 回リトライします：
-- `long_side` を **256px 縮小**（最小 768px）
-- `max_new_tokens` を **半分に縮小**（最小 256）
+### 🛡️ OOM 自動リカバリ機能搭載
+推論中に CUDA Out Of Memory (OOM) が発生した場合、スクリプトがクラッシュするのを防ぐために**自動的に1回のみパラメータを自動縮小して再試行**するリカバリ機能が組み込まれています。
+- **HunyuanOCR**: `--long_side` を **256px 縮小**（最小 768px）、`max_new_tokens` を**半分**にして再実行。
+- **Qwen2.5-VL**: `max_pixels` を**半分**に削減、`max_new_tokens` を**半分**にして再実行。
 
 ---
 
-## 🔧 中国語前置きフィルタについて
+## 🧹 中国語前置きの自動フィルタ機能について
 
-HunyuanOCR は中国語モデルのため、日本語画像でも先頭に中国語の前置き文を出力することがあります：
+HunyuanOCR や Qwen はマルチリンガル/中国語ベースのモデルであるため、日本語の画像を処理する場合でも、稀にテキストの先頭に以下のような余計な中国語の前置き文を出力することがあります。
 
-```
-以下是图片中的文字内容
-（ここから本文）
-```
+> 「以下是图片中的文字内容：」 (以下は画像内の文字内容です)
 
-`OCR_multiple_image.py` では約 20 パターンの前置き文を正規表現で自動検出・除去し、  
-さらに「かな（ひらがな・カタカナ）を含まない短文で中国語キーワードを含む行」も前置きとして除去します。
+本リポジトリのバッチ処理スクリプトには、これらの代表的な前置き文約 20 パターンを自動で検知して削り落とす**クレンジングフィルター（`clean_ocr_text`）**が組み込まれています。また、「かな（ひらがな・カタカナ）を含まない短文で中国語キーワードを含む行」も検知して自動除去されるため、出力ファイルにはクリアな日本語テキストだけが保存されます。
 
 ---
 
@@ -214,20 +206,12 @@ HunyuanOCR は中国語モデルのため、日本語画像でも先頭に中国
 
 | パッケージ | 用途 |
 |-----------|------|
-| [HunyuanOCR](https://huggingface.co/tencent/HunyuanOCR) | Tencent の VLM ベース OCR モデル |
-| [transformers](https://github.com/huggingface/transformers) | モデルのロード・推論 |
+| [HunyuanOCR](https://huggingface.co/tencent/HunyuanOCR) | Tencent の VLM ベース超高精度 OCR モデル |
+| [Qwen2.5-VL-7B-Instruct-AWQ](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct-AWQ) | 4bit量子化された最高峰のオープンソース VLM モデル |
+| [transformers](https://github.com/huggingface/transformers) | モデルのロード・推論フレームワーク |
 | [PyTorch](https://pytorch.org/) | GPU 推論基盤 |
-| [Pillow](https://python-pillow.org/) | 画像の読み込み・リサイズ |
+| [Pillow](https://python-pillow.org/) | 画像の読み込み・最適化リサイズ |
 | [accelerate](https://github.com/huggingface/accelerate) | `device_map="auto"` によるメモリ最適化 |
-
----
-
-## 📌 注意事項
-
-- 初回実行時にモデルが **~5GB** ダウンロードされます（`~/.cache/huggingface/` に保存）
-- `--long_side` を大きくしすぎると OOM になります。10GB 環境では **1280 以下** を推奨
-- URL 画像の読み込みは `OCR_One_image.py` のみ対応（`http://` で始まるパスを指定可能）
-- `attn_implementation="eager"` を使用しています（Flash Attention 未使用で互換性重視）
 
 ---
 
